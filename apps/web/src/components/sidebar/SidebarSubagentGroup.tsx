@@ -160,6 +160,7 @@ export const SidebarSubagentGroup = memo(function SidebarSubagentGroup(props: {
       const from = previous[index];
       const to = next[index];
       if (!node || !to) return;
+      node.style.visibility = "visible";
       if (!from || duration === 0) {
         node.style.transition = "none";
         node.style.transform = `translate3d(${to.x}px, ${to.y}px, 0)`;
@@ -176,137 +177,141 @@ export const SidebarSubagentGroup = memo(function SidebarSubagentGroup(props: {
   }, [flightKey]);
 
   return (
-    <div ref={rootRef} className="relative px-(--sidebar-row-content-inset) pb-1">
-      <button
-        type="button"
-        data-testid="sidebar-subagent-toggle"
-        aria-expanded={props.expanded}
-        aria-controls={panelId}
-        aria-label={countLabel}
-        onClick={(event) => {
-          event.stopPropagation();
-          props.onExpandedChange(props.parentKey, !props.expanded);
-        }}
-        className="group inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-md text-xs text-sidebar-muted-foreground hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-      >
-        <span className="inline-flex items-center gap-1">
-          {Array.from({ length: clusterCount }, (_, index) => (
-            <span
-              key={index}
-              ref={(node) => {
-                clusterRefs.current[index] = node;
+    <div className="px-(--sidebar-row-content-inset) pb-1">
+      <div ref={rootRef} className="relative">
+        <button
+          type="button"
+          data-testid="sidebar-subagent-toggle"
+          aria-expanded={props.expanded}
+          aria-controls={panelId}
+          aria-label={countLabel}
+          onClick={(event) => {
+            event.stopPropagation();
+            props.onExpandedChange(props.parentKey, !props.expanded);
+          }}
+          className="group inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-md text-xs text-sidebar-muted-foreground hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        >
+          <span className="inline-flex items-center gap-1">
+            {Array.from({ length: clusterCount }, (_, index) => (
+              <span
+                key={index}
+                ref={(node) => {
+                  clusterRefs.current[index] = node;
+                }}
+                className="size-3.5"
+              />
+            ))}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="tabular-nums">{props.threads.length}</span>
+            <ChevronRightIcon
+              aria-hidden
+              className="size-3"
+              style={{
+                transform: props.expanded ? "rotate(90deg)" : "rotate(0deg)",
+                transition: prefersReducedMotion() ? "none" : `transform 160ms ${OUT_EASE}`,
               }}
-              className="size-3.5"
             />
-          ))}
-        </span>
-        <span className="inline-flex items-center gap-1 transition-transform duration-150 ease-out group-active:scale-[0.97] motion-reduce:transition-none">
-          <span className="tabular-nums">{props.threads.length}</span>
-          <ChevronRightIcon
-            aria-hidden
-            className="size-3"
-            style={{
-              transform: props.expanded ? "rotate(90deg)" : "rotate(0deg)",
-              transition: prefersReducedMotion() ? "none" : `transform 160ms ${OUT_EASE}`,
-            }}
-          />
-        </span>
-      </button>
-      <div
-        id={panelId}
-        inert={props.expanded ? undefined : true}
-        className={cn("grid", props.expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}
-        style={{
-          transition: prefersReducedMotion() ? "none" : `grid-template-rows 200ms ${MOVE_EASE}`,
-        }}
-      >
-        <div className="min-h-0 overflow-hidden">
-          <ul className="m-0 list-none pt-0.5">
-            {visibleThreads.map((thread, index) => {
-              const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-              const status = resolveSidebarThreadStatus(thread);
-              const label = sidebarSubagentStatusLabel(status);
-              const provider =
-                props.providerEntryByInstanceId.get(thread.providerInstanceId) ?? null;
-              const startedAt = sidebarSubagentShowsElapsed(status)
-                ? sidebarSubagentElapsedStartedAt(thread, status)
-                : null;
-              const accessible = [thread.title, provider?.displayName, label]
-                .filter(Boolean)
-                .join(", ");
-              return (
-                <li key={threadKey} className="list-none">
+          </span>
+        </button>
+        <div
+          id={panelId}
+          inert={props.expanded ? undefined : true}
+          className={cn("grid", props.expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}
+          style={{
+            transition: prefersReducedMotion() ? "none" : `grid-template-rows 200ms ${MOVE_EASE}`,
+          }}
+        >
+          <div className="min-h-0 overflow-hidden">
+            <ul className="m-0 list-none pt-0.5">
+              {visibleThreads.map((thread, index) => {
+                const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+                const status = resolveSidebarThreadStatus(thread);
+                const label = sidebarSubagentStatusLabel(status);
+                const provider =
+                  props.providerEntryByInstanceId.get(thread.providerInstanceId) ?? null;
+                const startedAt = sidebarSubagentShowsElapsed(status)
+                  ? sidebarSubagentElapsedStartedAt(thread, status)
+                  : null;
+                const accessible = [thread.title, provider?.displayName, label]
+                  .filter(Boolean)
+                  .join(", ");
+                return (
+                  <li key={threadKey} className="list-none">
+                    <button
+                      type="button"
+                      data-testid="sidebar-subagent-row"
+                      aria-current={props.activeThreadKey === threadKey ? "page" : undefined}
+                      aria-label={accessible}
+                      title={
+                        provider === null
+                          ? thread.title
+                          : `${thread.title}, ${provider.displayName}`
+                      }
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        props.onOpen(scopeThreadRef(thread.environmentId, thread.id));
+                      }}
+                      className={cn(
+                        "flex h-5 w-full cursor-pointer items-center gap-1.5 rounded-md text-left hover:bg-sidebar-row-hover active:bg-sidebar-row-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+                        props.activeThreadKey === threadKey && "bg-sidebar-row-active",
+                      )}
+                    >
+                      <span
+                        ref={(node) => {
+                          rowRefs.current[index] = node;
+                        }}
+                        className="size-3.5 shrink-0"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-[13px]">{thread.title}</span>
+                      {label === null ? null : (
+                        <span
+                          className={cn(
+                            "inline-flex shrink-0 items-center gap-1 text-[11px]",
+                            statusClassName(status),
+                          )}
+                        >
+                          <StatusIcon status={status} />
+                          <span className="sr-only">{label}</span>
+                          <SubagentElapsed startedAt={startedAt} />
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+              {hiddenCount > 0 ? (
+                <li className="list-none">
                   <button
                     type="button"
-                    data-testid="sidebar-subagent-row"
-                    aria-current={props.activeThreadKey === threadKey ? "page" : undefined}
-                    aria-label={accessible}
-                    title={
-                      provider === null ? thread.title : `${thread.title}, ${provider.displayName}`
-                    }
                     onClick={(event) => {
                       event.stopPropagation();
-                      props.onOpen(scopeThreadRef(thread.environmentId, thread.id));
+                      setVisibleCount((count) => count + SUBAGENT_ROW_WINDOW);
                     }}
-                    className={cn(
-                      "flex h-5 w-full cursor-pointer items-center gap-1.5 rounded-md text-left hover:bg-sidebar-row-hover active:bg-sidebar-row-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-                      props.activeThreadKey === threadKey && "bg-sidebar-row-active",
-                    )}
+                    className="flex h-6 w-full cursor-pointer items-center rounded-md text-left text-xs text-sidebar-muted-foreground hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
                   >
-                    <span
-                      ref={(node) => {
-                        rowRefs.current[index] = node;
-                      }}
-                      className="size-3.5 shrink-0"
-                    />
-                    <span className="min-w-0 flex-1 truncate text-[13px]">{thread.title}</span>
-                    {label === null ? null : (
-                      <span
-                        className={cn(
-                          "inline-flex shrink-0 items-center gap-1 text-[11px]",
-                          statusClassName(status),
-                        )}
-                      >
-                        <StatusIcon status={status} />
-                        <span className="sr-only">{label}</span>
-                        <SubagentElapsed startedAt={startedAt} />
-                      </span>
-                    )}
+                    Show {Math.min(hiddenCount, SUBAGENT_ROW_WINDOW)} more
                   </button>
                 </li>
-              );
-            })}
-            {hiddenCount > 0 ? (
-              <li className="list-none">
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setVisibleCount((count) => count + SUBAGENT_ROW_WINDOW);
-                  }}
-                  className="flex h-6 w-full cursor-pointer items-center rounded-md text-left text-xs text-sidebar-muted-foreground hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-                >
-                  Show {Math.min(hiddenCount, SUBAGENT_ROW_WINDOW)} more
-                </button>
-              </li>
-            ) : null}
-          </ul>
+              ) : null}
+            </ul>
+          </div>
         </div>
+        {visibleThreads.map((thread, index) => (
+          <span
+            key={thread.id}
+            ref={(node) => {
+              iconRefs.current[index] = node;
+            }}
+            aria-hidden
+            className="pointer-events-none invisible absolute top-0 left-0"
+          >
+            <ProviderMark
+              provider={props.providerEntryByInstanceId.get(thread.providerInstanceId) ?? null}
+            />
+          </span>
+        ))}
       </div>
-      {visibleThreads.map((thread, index) => (
-        <span
-          key={thread.id}
-          ref={(node) => {
-            iconRefs.current[index] = node;
-          }}
-          aria-hidden
-          className="pointer-events-none absolute top-0 left-0"
-        >
-          <ProviderMark
-            provider={props.providerEntryByInstanceId.get(thread.providerInstanceId) ?? null}
-          />
-        </span>
-      ))}
     </div>
   );
 });
