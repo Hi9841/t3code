@@ -15,6 +15,12 @@ import {
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
   filterSidebarV2VisibleThreads,
+  groupSidebarSubagents,
+  resolveSidebarSubagentExpanded,
+  sidebarSubagentCountLabel,
+  sidebarSubagentElapsedStartedAt,
+  sidebarSubagentGroupIsLive,
+  sidebarSubagentStatusLabel,
   formatWorkingDurationLabel,
   getFallbackThreadIdAfterDelete,
   getProjectSortTimestamp,
@@ -64,6 +70,7 @@ import {
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { sortSettledThreads } from "@t3tools/client-runtime/state/thread-sort";
 import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 
 import {
   DEFAULT_INTERACTION_MODE,
@@ -459,6 +466,137 @@ describe("sidebar thread lineage helpers", () => {
 
     expect(isSidebarSubagentThread(subagent)).toBe(true);
     expect(isSidebarSubagentThread(makeThreadFixture())).toBe(false);
+  });
+
+  it("nests subagents under the visible ancestor, in spawn order", () => {
+    const environmentId = EnvironmentId.make("environment-visible");
+    const parentId = ThreadId.make("thread-parent");
+    const root = makeThreadFixture({
+      id: parentId,
+      environmentId,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    const later = makeThreadFixture({
+      id: ThreadId.make("thread-subagent-later"),
+      environmentId,
+      title: "Windows UI Automation",
+      createdAt: "2026-01-01T00:02:00.000Z",
+      lineage: {
+        rootThreadId: parentId,
+        parentThreadId: parentId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const earlier = makeThreadFixture({
+      id: ThreadId.make("thread-subagent-earlier"),
+      environmentId,
+      title: "P0 controls",
+      createdAt: "2026-01-01T00:01:00.000Z",
+      lineage: {
+        rootThreadId: parentId,
+        parentThreadId: parentId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const nestedParentId = earlier.id;
+    const nested = makeThreadFixture({
+      id: ThreadId.make("thread-subagent-nested"),
+      environmentId,
+      createdAt: "2026-01-01T00:03:00.000Z",
+      lineage: {
+        rootThreadId: parentId,
+        parentThreadId: nestedParentId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const archived = makeThreadFixture({
+      id: ThreadId.make("thread-subagent-archived"),
+      environmentId,
+      archivedAt: "2026-01-02T00:00:00.000Z",
+      lineage: {
+        rootThreadId: parentId,
+        parentThreadId: parentId,
+        relationshipToParent: "subagent",
+      },
+    });
+    const orphan = makeThreadFixture({
+      id: ThreadId.make("thread-subagent-orphan"),
+      environmentId,
+      lineage: {
+        rootThreadId: ThreadId.make("thread-missing"),
+        parentThreadId: ThreadId.make("thread-missing"),
+        relationshipToParent: "subagent",
+      },
+    });
+    const fork = makeThreadFixture({
+      id: ThreadId.make("thread-fork"),
+      environmentId,
+      lineage: {
+        rootThreadId: parentId,
+        parentThreadId: parentId,
+        relationshipToParent: "fork",
+      },
+    });
+
+    const groups = groupSidebarSubagents([later, root, nested, earlier, archived, orphan, fork]);
+    const hostKey = scopedThreadKey(scopeThreadRef(environmentId, parentId));
+
+    expect([...groups.keys()]).toEqual([hostKey]);
+    expect(groups.get(hostKey)?.map((thread) => thread.id)).toEqual([
+      earlier.id,
+      later.id,
+      nested.id,
+    ]);
+    expect(sidebarSubagentCountLabel(2)).toBe("2 subagents");
+    expect(sidebarSubagentCountLabel(1)).toBe("1 subagent");
+  });
+
+  it("opens a live subagent group until the user collapses it", () => {
+    const resting = {
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      runtime: null,
+    };
+    const working = {
+      ...resting,
+      runtime: {
+        status: "running" as const,
+        activeRunId: null,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providerName: null,
+        lastError: null,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    };
+
+    expect(sidebarSubagentGroupIsLive([resting])).toBe(false);
+    expect(sidebarSubagentGroupIsLive([working])).toBe(true);
+    expect(
+      resolveSidebarSubagentExpanded({
+        override: undefined,
+        live: true,
+        containsActiveThread: false,
+      }),
+    ).toBe(true);
+    expect(
+      resolveSidebarSubagentExpanded({
+        override: false,
+        live: true,
+        containsActiveThread: true,
+      }),
+    ).toBe(false);
+    expect(sidebarSubagentStatusLabel("waiting")).toBe("Waiting");
+    expect(sidebarSubagentStatusLabel("ready")).toBeNull();
+    expect(
+      sidebarSubagentElapsedStartedAt(
+        {
+          createdAt: "2026-01-01T00:00:00.000Z",
+          latestRun: null,
+          runtime: working.runtime,
+        },
+        "waiting",
+      ),
+    ).toBe("2026-01-01T00:00:00.000Z");
   });
 
   it("resolves the parent thread for fork sidebar affordances", () => {

@@ -183,6 +183,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
+import { SidebarSubagentGroup } from "./sidebar/SidebarSubagentGroup";
 import {
   buildDraftActionMenuItems,
   buildThreadActionMenuItems,
@@ -192,6 +193,9 @@ import {
   animateSidebarLayoutChanges,
   applySidebarThreadDrop,
   filterSidebarV2VisibleThreads,
+  groupSidebarSubagents,
+  resolveSidebarSubagentExpanded,
+  sidebarSubagentGroupIsLive,
   buildBulkTitleRegenerationContextMenuItem,
   buildBulkUnpinContextMenuItem,
   deleteSelectedThreadEntries,
@@ -2845,8 +2849,8 @@ export default function Sidebar() {
     // memo exactly at the next wake boundary.
     void snoozeWakeTick;
     const preciseNow = new Date().toISOString();
-    // Subagent child threads live in the parent's Agents surface, not the
-    // sidebar roster (v2 models them as real threads with lineage).
+    // Subagent threads stay out of the top-level roster. The sidebar nests
+    // them under the visible ancestor instead.
     const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
     inboxReturns.observe(workingShelfEnabled ? threads : null);
     const pinned: EnvironmentThreadShell[] = [];
@@ -2956,6 +2960,17 @@ export default function Sidebar() {
     threads,
     workingShelfEnabled,
   ]);
+  const subagentsByParentKey = useMemo(() => groupSidebarSubagents(threads), [threads]);
+  const [subagentGroupOverride, setSubagentGroupOverride] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map(),
+  );
+  const setSubagentGroupExpanded = useCallback((parentKey: string, expanded: boolean) => {
+    setSubagentGroupOverride((current) => {
+      const next = new Map(current);
+      next.set(parentKey, expanded);
+      return next;
+    });
+  }, []);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -5483,6 +5498,31 @@ export default function Sidebar() {
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
                           items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
+                          const subagents = subagentsByParentKey.get(item.key);
+                          if (subagents !== undefined && subagents.length > 0) {
+                            const containsActiveThread =
+                              routeThreadKey !== null &&
+                              subagents.some(
+                                (child) =>
+                                  scopedThreadKey(scopeThreadRef(child.environmentId, child.id)) ===
+                                  routeThreadKey,
+                              );
+                            items.push(
+                              <SidebarSubagentGroup
+                                key={`${item.key}:subagents`}
+                                parentKey={item.key}
+                                threads={subagents}
+                                expanded={resolveSidebarSubagentExpanded({
+                                  override: subagentGroupOverride.get(item.key),
+                                  live: sidebarSubagentGroupIsLive(subagents),
+                                  containsActiveThread,
+                                })}
+                                activeThreadKey={routeThreadKey}
+                                onExpandedChange={setSubagentGroupExpanded}
+                                onOpen={navigateToThread}
+                              />,
+                            );
+                          }
                           continue;
                         }
                         switch (item.marker) {

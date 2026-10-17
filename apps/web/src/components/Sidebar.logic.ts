@@ -1,3 +1,4 @@
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
@@ -580,6 +581,125 @@ export function filterSidebarV2VisibleThreads<
       (scopedProjectKeys === null ||
         scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
   );
+}
+
+// Nested subagents stay under the first visible ancestor. A cycle or a
+// missing parent drops the row instead of inventing a top-level thread.
+const SIDEBAR_SUBAGENT_HOST_WALK_LIMIT = 8;
+
+type SidebarSubagentNode = Pick<
+  SidebarThreadSummary,
+  "id" | "environmentId" | "archivedAt" | "createdAt" | "lineage"
+>;
+
+function sidebarThreadKeyOf(thread: Pick<SidebarSubagentNode, "environmentId" | "id">): string {
+  return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+}
+
+function sidebarSubagentHostKey<T extends SidebarSubagentNode>(
+  thread: T,
+  byKey: ReadonlyMap<string, T>,
+): string | null {
+  let current = thread;
+  const seen = new Set<string>([sidebarThreadKeyOf(thread)]);
+  for (let depth = 0; depth < SIDEBAR_SUBAGENT_HOST_WALK_LIMIT; depth += 1) {
+    const parentId = current.lineage.parentThreadId;
+    if (parentId === null) return null;
+    const parent = byKey.get(scopedThreadKey(scopeThreadRef(current.environmentId, parentId)));
+    if (parent === undefined || parent.archivedAt !== null) return null;
+    const parentKey = sidebarThreadKeyOf(parent);
+    if (seen.has(parentKey)) return null;
+    seen.add(parentKey);
+    if (!isSidebarSubagentThread(parent)) return parentKey;
+    current = parent;
+  }
+  return null;
+}
+
+/** Subagent threads grouped under the sidebar row that stays visible. */
+export function groupSidebarSubagents<T extends SidebarSubagentNode>(
+  threads: readonly T[],
+): ReadonlyMap<string, readonly T[]> {
+  const byKey = new Map<string, T>();
+  for (const thread of threads) {
+    byKey.set(sidebarThreadKeyOf(thread), thread);
+  }
+  const groups = new Map<string, T[]>();
+  for (const thread of threads) {
+    if (thread.archivedAt !== null || !isSidebarSubagentThread(thread)) continue;
+    const hostKey = sidebarSubagentHostKey(thread, byKey);
+    if (hostKey === null) continue;
+    const list = groups.get(hostKey);
+    if (list === undefined) groups.set(hostKey, [thread]);
+    else list.push(thread);
+  }
+  for (const list of groups.values()) {
+    list.sort((left, right) => {
+      const byTime = firstValidTimestampMs(left.createdAt) - firstValidTimestampMs(right.createdAt);
+      if (byTime !== 0) return byTime;
+      return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+    });
+  }
+  return groups;
+}
+
+export function sidebarSubagentCountLabel(count: number): string {
+  return `${count} ${count === 1 ? "subagent" : "subagents"}`;
+}
+
+export function sidebarSubagentGroupIsLive(
+  children: readonly Pick<
+    SidebarThreadSummary,
+    "hasPendingApprovals" | "hasPendingUserInput" | "runtime"
+  >[],
+): boolean {
+  return children.some((child) => {
+    const status = resolveSidebarThreadStatus(child);
+    return (
+      status === "working" || status === "waiting" || status === "approval" || status === "input"
+    );
+  });
+}
+
+export function resolveSidebarSubagentExpanded(input: {
+  readonly override: boolean | undefined;
+  readonly live: boolean;
+  readonly containsActiveThread: boolean;
+}): boolean {
+  if (input.override !== undefined) return input.override;
+  return input.live || input.containsActiveThread;
+}
+
+export function sidebarSubagentStatusLabel(status: SidebarThreadStatus): string | null {
+  switch (status) {
+    case "working":
+      return "Working";
+    case "waiting":
+      return "Waiting";
+    case "approval":
+      return "Approval";
+    case "input":
+      return "Input";
+    case "failed":
+      return "Failed";
+    case "limited":
+      return "Limited";
+    case "ready":
+      return null;
+  }
+}
+
+export function sidebarSubagentShowsElapsed(status: SidebarThreadStatus): boolean {
+  return status === "working" || status === "waiting";
+}
+
+export function sidebarSubagentElapsedStartedAt(
+  thread: Pick<SidebarThreadSummary, "createdAt" | "latestRun" | "runtime">,
+  status: SidebarThreadStatus,
+): string | null {
+  if (status === "working") return resolveWorkingStartedAt(thread);
+  if (status === "waiting") return thread.createdAt;
+  return null;
 }
 
 export function getSidebarForkParentThreadId(
